@@ -10,13 +10,15 @@
 #include <fcntl.h>       // Para constantes de apertura de archivos
 #include <string.h>
 
-// 1. Defino QUÉ vamos a compartir entre los procesos
+// Definimos que vamos a compartir entre los procesos
 typedef struct {
     double saldo;
-    sem_t semaforo;
+    sem_t semaforo;     // sem_t = Semaphore Type
 } DatosCompartidos;
 
+// =========================================================================
 // FUNCIÓN CRÉDITO (Suma al saldo)
+// =========================================================================
 void credito(char *archivo_montos, int p[], DatosCompartidos *memoria) {
     // 1. Abrimos el archivo en modo lectura ("r")
     FILE *archivo = fopen(archivo_montos, "r");
@@ -50,7 +52,9 @@ void credito(char *archivo_montos, int p[], DatosCompartidos *memoria) {
 }
 
 
+// =========================================================================
 // FUNCIÓN DÉBITO (Resta al saldo)
+// =========================================================================
 void debito(char *archivo_montos, int p[], DatosCompartidos *memoria) {
     // 1. Abrimos el archivo en modo lectura ("r")
     FILE *archivo = fopen(archivo_montos, "r");
@@ -82,19 +86,27 @@ void debito(char *archivo_montos, int p[], DatosCompartidos *memoria) {
 }
 
 int main() {
+
     // Variables para los pipes (arreglos de 2 enteros) y los IDs de los procesos
-    int pipe_credito[2];
-    int pipe_debito[2];
-    pid_t pid_credito, pid_debito;
+    int pipe_credito[2];        // pipe_credito[0] -> Es el extremo de LECTURA (Read). Es la "oreja". Lo usas para sacar datos del tubo. 
+    int pipe_debito[2];         // pipe_debito[1] -> Es el extremo de ESCRITURA (Write). Es la "boca". Lo usas para inyectar datos al tubo.
+    pid_t pid_credito, pid_debito;  // pid_t = Process ID Type
 
     printf("Padre: Preparando el entorno...\n");
 
     // 1. Crear la Memoria Compartida
     // Pedimos al sistema un bloque del tamaño de nuestra estructura
-    DatosCompartidos *memoria = mmap(NULL, sizeof(DatosCompartidos), 
-                                     PROT_READ | PROT_WRITE, 
-                                     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    
+
+    // mmap = Memory Map, es como un súper-malloc. Le pide al Sistema Operativo que cree una "pizarra pública" en la RAM que sobreviva a la clonación y que todos los hijos puedan ver y editar al mismo tiempo.
+    // NULL -> Acá le estás diciendo al Sistema Operativo: "Elegí vos en qué dirección física de la RAM vas a construir la pizarra, a mí no me importa, vos sos el jefe".
+    // sizeof(DatosCompartidos) -> Es el tamaño de la pizarra. "Hacela justo del tamaño necesario para que entre mi estructura con el double y el semáforo".
+
+    DatosCompartidos *memoria = mmap(NULL, sizeof(DatosCompartidos),        
+                                     PROT_READ | PROT_WRITE,                // PROT_READ | PROT_WRITE -> Son los permisos. Le decís que en esa memoria querés tener protección de Lectura (READ) y de Escritura (WRITE).
+                                     MAP_SHARED | MAP_ANONYMOUS, -1, 0);    // MAP_SHARED -> Es lo que permite que cuando el hijo Crédito modifique el saldo, el hijo Débito y el Padre vean el cambio al instante.
+                                                                            // MAP_ANONYMOUS -> Originalmente, mmap se inventó para volcar archivos del disco duro a la RAM. Al ponerle Anónimo, le decís: "No voy a vincular esta memoria a ningún archivo real en el disco duro, creame un espacio en blanco directo en la RAM".
+                                                                            // -1 -> Como le dijiste que era Anónimo y no hay ningún archivo de verdad, este parámetro (donde iría el identificador del archivo) se rellena con un -1 por obligación.
+                                                                            // 0 -> Es el "desplazamiento". Como no hay archivo, arrancamos desde la posición cero.
     if (memoria == MAP_FAILED) {
         perror("Error al crear la memoria compartida");
         exit(1);
@@ -105,13 +117,18 @@ int main() {
     
     // Inicializamos el semáforo. 
     // Argumentos: puntero al semáforo, 1 (para compartir entre procesos), 1 (valor inicial: libre)
-    if (sem_init(&memoria->semaforo, 1, 1) == -1) {
+
+    // sem_init = Semaphore Initialize
+    // &memoria->semaforo -> Le pasamos la dirección de memoria exacta donde pusimos nuestro candado. Le decimos: "Che, sistema operativo, configurame este semáforo que dejé preparado acá en la pizarra compartida".
+    // 1 -> Le estás diciendo: "Este semáforo va a ser usado por distintos PROCESOS completos (mis clones que voy a crear con fork). Si ponés un 0, significa que el semáforo es "privado" y solo sirve para hilos (threads) dentro de un mismo programa.   
+    // 1 -> le estamos diciendo que hay 1 sola llave disponible.
+    if (sem_init(&memoria->semaforo, 1, 1) == -1) {     // sem_init = Semaphore Initialize
         perror("Error al inicializar el semáforo");
         exit(1);
     }
 
     // 3. Crear los Pipes (Walkie-talkies)
-    if (pipe(pipe_credito) == -1 || pipe(pipe_debito) == -1) {
+    if (pipe(pipe_credito) == -1 || pipe(pipe_debito) == -1) {      // pipe(...) -> le estás dando una orden directa al Sistema Operativo: "Fabricame un túnel de comunicación en la memoria, y guardame los números de los extremos (la oreja y la boca) adentro de este arreglo que te paso".
         perror("Error al crear los pipes");
         exit(1);
     }
@@ -119,7 +136,7 @@ int main() {
     printf("Padre: Memoria, semáforo y pipes listos.\n");
 
     // 4. Creamos el primer hijo (Proceso Crédito)
-    pid_credito = fork();
+    pid_credito = fork();       // fork() -> lo clona por completo. Literalmente hace una fotocopia del proceso (el Padre) en la memoria RAM. A partir de ese exacto milisegundo, ya no hay un solo programa corriendo, ¡sino dos!
 
     if (pid_credito < 0) {
         perror("Error al crear el hijo credito");
@@ -139,7 +156,7 @@ int main() {
     }
 
     // 5. Creamos el segundo hijo (Proceso Débito)
-    // Ojo: Solo el PADRE sobrevive para llegar a esta línea
+    // Solo el PADRE sobrevive para llegar a esta línea
     pid_debito = fork();
 
     if (pid_debito < 0) {
@@ -194,7 +211,7 @@ int main() {
         }
     }
 
-    // 7. Esperamos a que los hijos mueran formalmente (evita los procesos "zombie")
+    // 7. Esperamos a que los hijos mueran formalmente (evita los procesos "zombie", (a veces me andaba mal, me ayudo la IA con esto))
     wait(NULL);
     wait(NULL);
 
