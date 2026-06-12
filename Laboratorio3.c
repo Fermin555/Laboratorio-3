@@ -104,6 +104,51 @@ int main() {
 
     printf("Padre: Hijos creados correctamente. Esperando los reportes...\n");
 
+    // Variables para el bucle de escucha
+    double monto_leido;
+    int activo_credito = 1; // 1 significa que sigue vivo, 0 que ya terminó
+    int activo_debito = 1;
+
+    // Mientras al menos un hijo siga activo
+    while (activo_credito == 1 || activo_debito == 1) {
+        
+        // Escuchamos al hijo Crédito
+        if (activo_credito == 1) {
+            // La función read devuelve cuántos bytes pudo leer. 
+            // Si devuelve > 0, es que llegó un número. Si devuelve 0, el hijo cerró el tubo.
+            if (read(pipe_credito[0], &monto_leido, sizeof(double)) > 0) {
+                printf("Padre: El hijo CRÉDITO sumó $%.2f\n", monto_leido);
+            } else {
+                activo_credito = 0; // El pipe se cerró, dejamos de escucharlo
+            }
+        }
+
+        // Escuchamos al hijo Débito
+        if (activo_debito == 1) {
+            if (read(pipe_debito[0], &monto_leido, sizeof(double)) > 0) {
+                printf("Padre: El hijo DÉBITO restó $%.2f\n", monto_leido);
+            } else {
+                activo_debito = 0; // El pipe se cerró, dejamos de escucharlo
+            }
+        }
+    }
+
+    // 7. Esperamos a que los hijos mueran formalmente (evita los procesos "zombie")
+    wait(NULL);
+    wait(NULL);
+
+    // 8. Imprimimos el saldo que quedó en la pizarra compartida
+    printf("\n========================================\n");
+    printf("  SALDO FINAL: $%.2f\n", memoria->saldo);
+    printf("========================================\n");
+
+    // 9. Limpieza general 
+    close(pipe_credito[0]);         // Cerramos los pipes de lectura que usaba el padre
+    close(pipe_debito[0]);
+    sem_destroy(&memoria->semaforo); // Destruimos el semáforo
+    munmap(memoria, sizeof(DatosCompartidos)); // Devolvemos la memoria compartida al SO
+
+    printf("Programa finalizado correctamente.\n");
 
     return 0;
 }
