@@ -21,8 +21,42 @@ void debito(char *archivo_montos, int p[], DatosCompartidos *memoria);
 void credito(char *archivo_montos, int p[], DatosCompartidos *memoria);
 
 int main() {
+    // Variables para los pipes (arreglos de 2 enteros) y los IDs de los procesos
+    int pipe_credito[2];
+    int pipe_debito[2];
+    pid_t pid_credito, pid_debito;
+
+    printf("Padre: Preparando el entorno...\n");
+
+    // 1. Crear la Memoria Compartida
+    // Pedimos al sistema un bloque del tamaño de nuestra estructura
+    DatosCompartidos *memoria = mmap(NULL, sizeof(DatosCompartidos), 
+                                     PROT_READ | PROT_WRITE, 
+                                     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     
-    printf("Programa iniciado...\n");
+    if (memoria == MAP_FAILED) {
+        perror("Error al crear la memoria compartida");
+        exit(1);
+    }
+
+    // 2. Inicializar los datos compartidos
+    memoria->saldo = 0.0; // El saldo arranca en cero
+    
+    // Inicializamos el semáforo. 
+    // Argumentos: puntero al semáforo, 1 (para compartir entre procesos), 1 (valor inicial: libre)
+    if (sem_init(&memoria->semaforo, 1, 1) == -1) {
+        perror("Error al inicializar el semáforo");
+        exit(1);
+    }
+
+    // 3. Crear los Pipes (Walkie-talkies)
+    if (pipe(pipe_credito) == -1 || pipe(pipe_debito) == -1) {
+        perror("Error al crear los pipes");
+        exit(1);
+    }
+
+    printf("Padre: Memoria, semáforo y pipes listos.\n");
+
 
     return 0;
 }
